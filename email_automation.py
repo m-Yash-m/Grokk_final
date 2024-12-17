@@ -43,18 +43,21 @@ def get_gsheet_service():
     
     return client
 
-# Function to evaluate a candidate and generate email with Grok API
+def remove_asterisks(text: str) -> str:
+    # Remove any asterisks from the text and replace them with an empty string
+    cleaned_text = text.replace('*', '')
+    return cleaned_text  
+
 def evaluate_and_generate_email(candidate_data: str, cohort_details: dict) -> str:
     prompt = f"""
-    You are an AI designed to create warm and professional invitation emails for an entrepreneurial cohort program. 
-    This program provides experiential learning, expert mentorship, and a launchpad into the startup ecosystem.
+    You are an AI designed to create a formal and professional invitation email for an entrepreneurial cohort program. 
+    The program offers experiential learning, expert mentorship, and a strong launchpad into the startup ecosystem.
 
-    Based on the candidate data provided below and the cohort program details, generate a formal yet friendly invitation email. 
-    Use emojis sparingly to highlight the event details (e.g., 📍 for location, 📅 for date, ⏰ for time). 
-    Note don't use asterisks or stars
-    Conclude the email with "Thanks and Regards, 18 Startup".
+    Based on the candidate data provided below and the cohort program details, generate a formal yet warm invitation email. 
+    The email should maintain a professional tone while using emojis sparingly to highlight important event details (e.g., 📍 for location, 📅 for date, ⏰ for time).
+    The email should not include any bold letters, asterisks, or any type of special formatting (like links, bold, or italics). 
 
-    Do not include any evaluations or scores in the email. The email should be concise and only focus on inviting the candidate.
+    Do not include any RSVP details or links in the email. The email must remain clear and concise, and should focus solely on inviting the candidate to the event. It must always end with "Thanks & Regards, 18Startup".
 
     Candidate data:
     {candidate_data}
@@ -68,7 +71,7 @@ def evaluate_and_generate_email(candidate_data: str, cohort_details: dict) -> st
 
     suitability_payload = {
         "messages": [
-            {"role": "system", "content": "You are Grok, an AI designed to generate formal yet friendly invitations."},
+            {"role": "system", "content": "You are Grok, an AI designed to create formal and friendly invitations."},
             {"role": "user", "content": prompt}
         ],
         "model": "grok-beta",
@@ -82,9 +85,12 @@ def evaluate_and_generate_email(candidate_data: str, cohort_details: dict) -> st
 
     if suitability_response.status_code == 200:
         result = suitability_response.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+        result = remove_asterisks(result)
         return result.strip()
     else:
         return "Error in generating email content."
+
+
     
 def parse_grok_response(response_text: str) -> dict:
     """Extract rating and reason from Grok's response."""
@@ -149,91 +155,108 @@ def add_missing_columns(worksheet):
             worksheet.update_cell(1, len(header) + 1, col)  # Add the column name in the first row
             header.append(col)  # Update header for further checks
 
+# Function to extract Google Sheet ID from URL
+def extract_sheet_id(sheet_url: str) -> str:
+    match = re.search(r"/d/([a-zA-Z0-9_-]+)", sheet_url)
+    if match:
+        return match.group(1)
+    return None
+
 # Main function for chatbot-style interaction
 def main():
     st.title("18 Startup Interactive Invitation Automation")
 
     # Step 1: Google Sheet Configuration
     st.markdown("### Google Sheet Configuration")
-    google_sheet_id = st.text_input("What is the Google Sheet ID where the candidate data is stored?")
-    if google_sheet_id:
-        st.markdown("### Cohort Program Details")
+    google_sheet_url = st.text_input("Enter the Google Sheets URL where the candidate data is stored:")
 
-        # Step 2: Cohort Program Details
-        cohort_description = st.text_area("Describe the cohort program briefly:")
-        if cohort_description:
-            venue = st.text_input("Where will the event be held (Venue)?")
-            if venue:
-                event_date = st.date_input("What is the event date?")
-                if event_date:
-                    event_time = st.time_input("What time will the event start?")
-                    if event_time:
-                        st.markdown("### Candidate Evaluation")
+    if google_sheet_url:
+        sheet_id = extract_sheet_id(google_sheet_url)
+        if sheet_id:
+            st.markdown("### Cohort Program Details")
 
-                        # Step 3: Candidate Evaluation
-                        min_rating = st.slider("What is the minimum rating to invite candidates?", 1, 10, 5)
-                        email_subject = st.text_input("What should the email subject be?")
+            # Step 2: Cohort Program Details
+            cohort_description = st.text_area("Describe the cohort program briefly:")
+            if cohort_description:
+                venue = st.text_input("Where will the event be held (Venue)?")
+                if venue:
+                    event_date = st.date_input("What is the event date?")
+                    if event_date:
+                        event_time = st.time_input("What time will the event start?")
+                        if event_time:
+                            st.markdown("### Candidate Evaluation")
 
-                        if email_subject and st.button("Send Invitations"):
-                            st.write("Fetching data from Google Sheets...")
-                            try:
-                                # Fetch Google Sheets data
-                                client = get_gsheet_service()
-                                sheet = client.open_by_key(google_sheet_id)
-                                worksheet = sheet.get_worksheet(0)
-                                data = worksheet.get_all_records()
-                                df = pd.DataFrame(data)
-                                df = df.map(str)
+                            # Step 3: Candidate Evaluation
+                            min_rating = st.slider("What is the minimum rating to invite candidates?", 1, 10, 5)
+                            email_subject = st.text_input("What should the email subject be?")
 
-                                # Add missing columns if necessary
-                                add_missing_columns(worksheet)
+                            if email_subject and st.button("Send Invitations"):
+                                st.write("Fetching data from Google Sheets...")
 
-                                cohort_details = {
-                                    "venue": venue,
-                                    "date": event_date.strftime('%Y-%m-%d'),
-                                    "time": event_time.strftime('%H:%M:%S'),
-                                    "description": cohort_description,
-                                    "min_rating": min_rating
-                                }
+                                try:
+                                    # Fetch Google Sheets data using extracted sheet ID
+                                    client = get_gsheet_service()
+                                    sheet = client.open_by_key(sheet_id)
+                                    worksheet = sheet.get_worksheet(0)
+                                    data = worksheet.get_all_records()
+                                    df = pd.DataFrame(data)
+                                    df = df.map(str)
 
-                                st.write("Evaluating candidates...")
+                                    # Add missing columns if necessary
+                                    add_missing_columns(worksheet)
 
-                                header = worksheet.row_values(1)  # Fetch the header again here, after columns might have been added
+                                    cohort_details = {
+                                        "venue": venue,
+                                        "date": event_date.strftime('%Y-%m-%d'),
+                                        "time": event_time.strftime('%H:%M:%S'),
+                                        "description": cohort_description,
+                                        "min_rating": min_rating
+                                    }
 
-                                for idx, candidate in df.iterrows():
-                                    # Convert row to Python-native dictionary
-                                    candidate_data = json.dumps(candidate.to_dict())
-                                    response = evaluate_and_generate_email(candidate_data, cohort_details)
-                                    evaluation = evaluate_candidate_with_grok(candidate_data, candidate['Applicant Name'])
+                                    st.write("Evaluating candidates...")
 
-                                    rating = evaluation['rating']
-                                    df.at[idx, 'Rating'] = rating
-                                    df.at[idx, 'Evaluation Reason'] = evaluation['reason']
+                                    header = worksheet.row_values(1)  # Fetch the header again here, after columns might have been added
 
-                                    # Ensure valid email format
-                                    email_regex = r"^[a-zA-Z0-9._%+-]+@[a-zAZ0-9.-]+\.[a-zA-Z]{2,}$"
-                                    
-                                    email = candidate.get('Emails', '').strip()
-                                    if re.match(email_regex, email):
-                                        if rating >= cohort_details["min_rating"]:
-                                            df.at[idx, 'Status'] = "Selected and Email Sent"
-                                            email_content = response
-                                            st.write(send_email(email, email_subject, email_content))
+                                    for idx, candidate in df.iterrows():
+                                        # Convert row to Python-native dictionary
+                                        candidate_data = json.dumps(candidate.to_dict())
+                                        response = evaluate_and_generate_email(candidate_data, cohort_details)
+                                        evaluation = evaluate_candidate_with_grok(candidate_data, candidate['Full Name'])
 
-                                            # Update Google Sheets
-                                            row_number = idx + 2  # Row in Google Sheets (1-based index)
-                                            worksheet.update_cell(row_number, header.index('Status') + 1, df.at[idx, 'Status'])
-                                            worksheet.update_cell(row_number, header.index('Evaluation Reason') + 1, df.at[idx, 'Evaluation Reason'])
-                                            worksheet.update_cell(row_number, header.index('Rating') + 1, df.at[idx, 'Rating'])
+                                        rating = evaluation['rating']
+                                        df.at[idx, 'Rating'] = rating
+                                        df.at[idx, 'Evaluation Reason'] = evaluation['reason']
+
+                                        # Ensure valid email format
+                                        email_regex = r"^[a-zA-Z0-9._%+-]+@[a-zAZ0-9.-]+\.[a-zA-Z]{2,}$"
+                                        
+                                        email = candidate.get('Email ID', '').strip()
+                                        if re.match(email_regex, email):
+                                            if rating >= cohort_details["min_rating"]:
+                                                df.at[idx, 'Status'] = "Selected and Email Sent"
+                                                email_content = response
+                                                
+
+                                                st.write(send_email(email, email_subject, email_content))
+
+                                                # Update Google Sheets
+                                                row_number = idx + 2  # Row in Google Sheets (1-based index)
+                                                worksheet.update_cell(row_number, header.index('Status') + 1, df.at[idx, 'Status'])
+                                                worksheet.update_cell(row_number, header.index('Evaluation Reason') + 1, df.at[idx, 'Evaluation Reason'])
+                                                worksheet.update_cell(row_number, header.index('Rating') + 1, df.at[idx, 'Rating'])
+                                            else:
+                                                df.at[idx, 'Status'] = "Not Selected"
                                         else:
-                                            df.at[idx, 'Status'] = "Not Selected"
-                                    else:
-                                        st.warning(f"Invalid or missing email for {candidate.get('Applicant Name', 'Unknown')}.")
+                                            st.warning(f"Invalid or missing email for {candidate.get('Full Name', 'Unknown')}.")
 
-                                st.success("Process completed!")
+                                    st.success("Process completed!")
 
-                            except Exception as e:
-                                st.error(f"Error occurred: {e}")
+                                except Exception as e:
+                                    st.error(f"Error occurred: {e}")
+
+        else:
+            st.error("Invalid Google Sheets URL. Please provide a valid URL.")
+
 
 if __name__ == "__main__":
     main()
